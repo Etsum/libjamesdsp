@@ -20,6 +20,9 @@ typedef struct
 	JamesDSPLib jdsp;
     float mSamplingRate;
     int formatFloatModeInt32Mode;
+	int accumulate;
+	float *accBuf;
+	size_t accBufLen;
 	char *stringEq;
 	float *tempImpulseIncoming;
 	float drcAtkRel[4];
@@ -57,6 +60,8 @@ void EffectDSPMainDestructor(EffectDSPMain *dspmain)
 		free(dspmain->tempImpulseIncoming);
 	if (dspmain->stringEq)
 		free(dspmain->stringEq);
+	if (dspmain->accBuf)
+		free(dspmain->accBuf);
 #ifdef DEBUG
 	LOGI("Buffer freed");
 #endif
@@ -145,7 +150,7 @@ int32_t EffectDSPMainCommand(EffectDSPMain *dspmain, uint32_t cmdCode, uint32_t 
 #endif
 	if (cmdCode == EFFECT_CMD_SET_CONFIG)
 	{
-		effect_buffer_access_e mAccessMode;
+		effect_buffer_access_e mAccessMode = EFFECT_BUFFER_ACCESS_WRITE;
 		int32_t *replyData = (int32_t *)pReplyData;
 		int32_t ret = configure(dspmain, pCmdData, &mAccessMode);
 		if (ret != 0)
@@ -155,6 +160,9 @@ int32_t EffectDSPMainCommand(EffectDSPMain *dspmain, uint32_t cmdCode, uint32_t 
 		}
 		// Set sample rate
 		JamesDSPSetSampleRate(&dspmain->jdsp, dspmain->mSamplingRate, 0);
+		// Per-session insert effects are last in their chain: AudioFlinger expects them to add
+		// into the shared mix buffer, not overwrite it (in != out, ACCUMULATE)
+		dspmain->accumulate = mAccessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE;
 		*replyData = 0;
 		return 0;
 	}
@@ -796,7 +804,26 @@ int32_t EffectDSPMainProcess(EffectDSPMain *dspmain, audio_buffer_t *in, audio_b
 		dspmain->jdsp.processInt16Multiplexd(&dspmain->jdsp, in->s16, out->s16, actualFrameCount);
 		break;
 	case 1:
-		dspmain->jdsp.processFloatMultiplexd(&dspmain->jdsp, in->f32, out->f32, actualFrameCount);
+		if (dspmain->accumulate)
+		{
+			size_t n = actualFrameCount * 2;
+			// Grows on the audio thread, like JamesDSPReallocateBlock. Move to SET_CONFIG if it glitches.
+			if (dspmain->accBufLen < n)
+			{
+				free(dspmain->accBuf);
+				dspmain->accBuf = (float*)malloc(n * sizeof(float));
+				dspmain->accBufLen = dspmain->accBuf ? n : 0;
+			}
+		}
+		if (dspmain->accumulate && dspmain->accBuf)
+		{
+			size_t n = actualFrameCount * 2;
+			dspmain->jdsp.processFloatMultiplexd(&dspmain->jdsp, in->f32, dspmain->accBuf, actualFrameCount);
+			for (size_t i = 0; i < n; i++)
+				out->f32[i] += dspmain->accBuf[i];
+		}
+		else
+			dspmain->jdsp.processFloatMultiplexd(&dspmain->jdsp, in->f32, out->f32, actualFrameCount);
 		break;
 	case 2:
 		dspmain->jdsp.processInt32Multiplexd(&dspmain->jdsp, in->s32, out->s32, actualFrameCount);
