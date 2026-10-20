@@ -1,4 +1,17 @@
 # JamesDSP (Cross-platform Audio Effect / Digital Signal Processing library)
+
+## This fork
+
+Fork of [james34602/JamesDSPManager](https://github.com/james34602/JamesDSPManager) with one fix in the Android effect library (`libjamesdsp.so`):
+
+* **Enhanced (per-app) mode:** all sound on an output could stop. Android mixes the sound of all apps into one buffer. JamesDSP must add each app's sound to that buffer, but it replaced the buffer with the sound of one app. A paused player still sends silence. Thus a paused player could replace all other sound with silence. Fix: `Main/libjamesdsp/jni/jamesdsp/jamesdsp.c` (commit b3facc2).
+
+Download the built library from [Releases](https://github.com/Etsum/libjamesdsp/releases). The Magisk module [Etsum/JamesDSPManager](https://github.com/Etsum/JamesDSPManager) (v6.3 and later) includes it.
+
+Build: Android NDK r25c, `ndk-build -C Main/libjamesdsp APP_ABI=armeabi-v7a`. Test on the host: `Main/libjamesdsp/test/run.sh`.
+
+## Original README
+
 GUI is based on Omnirom DSP Manager and able to run on most Android devices from 5 to 10 include AOSP, Cyanogenmod, Huawei(arm64), LineageOS, Samsung and recent HTC. 
 This app include many cool features.
 
